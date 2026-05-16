@@ -2,6 +2,10 @@
  MIDI Controller Main Launcher for ESP32 Cheap Yellow Display
  Main file - handles setup, menu, and mode switching
  *******************************************************************/
+#include <Arduino.h>
+#include "EEPROM.h"
+
+#define EEPROM_SIZE 4
 
 #include <SPI.h>
 #include <XPT2046_Touchscreen.h>
@@ -24,6 +28,7 @@
 #include "lfo_mode.h"
 #include "ui_elements.h"
 #include "midi_utils.h"
+#include "settings_mode.h"
 
 // Hardware setup
 #define XPT2046_IRQ 36
@@ -81,10 +86,11 @@ AppIcon apps[] = {
   {"ARP", "↗", 0xF81F, ARPEGGIATOR},   // Magenta
   {"GRID", "▣", 0x07FF, GRID_PIANO},   // Cyan
   {"CHORD", "⚘", 0xFBE0, AUTO_CHORD},  // Light Orange
-  {"LFO", "", 0xAFE5, LFO}             // Light Green
+  {"LFO", "", 0xAFE5, LFO},           // Light Green
+  {"SETTINGS", "", 0xFFFF, SETTINGS}   // Dark Purple
 };
 
-int numApps = 10;
+int numApps = 11;
 
 class MIDICallbacks: public BLEServerCallbacks {
     void onConnect(BLEServer* pServer) {
@@ -111,7 +117,9 @@ class MIDICallbacks: public BLEServerCallbacks {
 
 void setup() {
   Serial.begin(115200);
-  
+  if (!EEPROM.begin(EEPROM_SIZE)) Serial.println("failed to initialize EEPROM");
+  if (EEPROM.read(0)!= 127) initEeprom();
+  channel = EEPROM.read(1);
   // Touch setup
   mySpi.begin(XPT2046_CLK, XPT2046_MISO, XPT2046_MOSI, XPT2046_CS);
   ts.begin(mySpi);
@@ -174,6 +182,7 @@ void setup() {
   initializeGridPianoMode();
   initializeAutoChordMode();
   initializeLFOMode();
+  initializeSettingsMode();
   
   drawMenu();
   updateStatus();
@@ -216,6 +225,9 @@ void loop() {
       break;
     case LFO:
       handleLFOMode();
+      break;
+    case SETTINGS:
+      handleSettingsMode();
       break;
   }
   
@@ -405,6 +417,16 @@ void drawAppGraphics(AppMode mode, int x, int y, int iconSize) {
         }
       }
       break;
+      case SETTINGS: // SETTINGS
+      {
+        int centerX = x + iconSize/2;
+        int centerY = y + iconSize/2;
+        int crossSize = 14;
+        tft.drawFastHLine(centerX - crossSize/2, centerY, crossSize, THEME_BG);
+        tft.drawFastVLine(centerX, centerY - crossSize/2, crossSize, THEME_BG);
+        tft.fillCircle(centerX, centerY, 3, THEME_BG);
+      }
+      break;
   }
 }
 
@@ -460,6 +482,9 @@ void enterMode(AppMode mode) {
       break;
     case LFO:
       drawLFOMode();
+      break;
+    case SETTINGS:
+      drawSettingsMode();
       break;
   }
   updateStatus();

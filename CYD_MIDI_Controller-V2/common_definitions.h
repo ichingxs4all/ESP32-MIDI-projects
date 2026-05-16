@@ -5,8 +5,8 @@
 #include <XPT2046_Touchscreen.h>
 #include <BLEDevice.h>
 
-#define channel 2 //MIDI channel to send to
-#define send_delay 30 //msec delay between note-on and note-off
+int channel = 1; //MIDI channel to send to
+int  send_delay = 30; //msec delay between note-on and note-off
 
 // Color scheme
 #define THEME_BG         0x0841
@@ -45,7 +45,8 @@ enum AppMode {
   ARPEGGIATOR,
   GRID_PIANO,
   AUTO_CHORD,
-  LFO
+  LFO,
+  SETTINGS
 };
 
 // Music theory
