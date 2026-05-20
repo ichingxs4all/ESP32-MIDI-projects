@@ -4,8 +4,9 @@
  *******************************************************************/
 #include <Arduino.h>
 #include "EEPROM.h"
+#include "version.h"
 
-#define EEPROM_SIZE 4
+#define EEPROM_SIZE 9
 
 #include <SPI.h>
 #include <XPT2046_Touchscreen.h>
@@ -16,6 +17,7 @@
 #include <BLE2902.h>
 
 // Include mode files
+#include "settings_mode.h"
 #include "keyboard_mode.h"
 #include "sequencer_mode.h"
 #include "bouncing_ball_mode.h"
@@ -28,7 +30,6 @@
 #include "lfo_mode.h"
 #include "ui_elements.h"
 #include "midi_utils.h"
-#include "settings_mode.h"
 #include "monitor_mode.h"
 #include "midi_clock_mode.h"
 
@@ -218,9 +219,14 @@ class BLEMidiReceiveCallbacks : public BLECharacteristicCallbacks {
 void setup() {
   Serial.begin(115200);
   if (!EEPROM.begin(EEPROM_SIZE)) Serial.println("failed to initialize EEPROM");
-  if (EEPROM.read(0)!= 127) initEeprom();
-  channel = EEPROM.read(1);
-  gateLength = EEPROM.read(2);
+  if (EEPROM.read(0) != 128) initEeprom();
+  channel      = EEPROM.read(1);
+  gateLength   = EEPROM.read(2);
+  drumChannel  = EEPROM.read(4);
+  drumNotes[0] = EEPROM.read(5);
+  drumNotes[1] = EEPROM.read(6);
+  drumNotes[2] = EEPROM.read(7);
+  drumNotes[3] = EEPROM.read(8);
 
   // Touch setup
   mySpi.begin(XPT2046_CLK, XPT2046_MISO, XPT2046_MOSI, XPT2046_CS);
@@ -381,31 +387,32 @@ void drawGearIcon(int cx, int cy, int outerR, int innerR, int teeth, uint16_t co
 void drawMenu() {
   tft.fillScreen(THEME_BG);
 
-  // Header
+  // Header bar
   tft.fillRect(0, 0, 320, 48, THEME_SURFACE);
   tft.drawFastHLine(0, 48, 320, THEME_PRIMARY);
 
-  // Gear button area (top-right of header): 38x38, touching right edge with 4px margin
-  // Drawn first so title can avoid it
-  int gearX  = 276;  // left edge of gear hit area
-  int gearY  = 5;    // top edge
+  // Gear button (top-right, 38x38)
+  int gearX  = 276;
+  int gearY  = 5;
   int gearW  = 38;
   int gearH  = 38;
-  int gearCX = gearX + gearW / 2;
-  int gearCY = gearY + gearH / 2;
-
   tft.fillRoundRect(gearX, gearY, gearW, gearH, 6, THEME_BG);
-  drawGearIcon(gearCX, gearCY, 14, 9, 8, THEME_TEXT_DIM);
+  drawGearIcon(gearX + gearW / 2, gearY + gearH / 2, 14, 9, 8, THEME_TEXT_DIM);
 
-  // Title — centred in the space left of the gear (0..275)
+  // Row 1: title (left-aligned) + version number immediately after
   tft.setTextColor(THEME_PRIMARY, THEME_SURFACE);
-  tft.drawCentreString("MIDI CONTROLLER", 135, 8, 4);
+  tft.drawString("MIDI CONTROLLER", 6, 5, 4);
   tft.setTextColor(THEME_TEXT_DIM, THEME_SURFACE);
-  tft.drawCentreString("Cheap Yellow Display", 135, 28, 2);
+  tft.drawString(FW_VERSION, 220, 13, 2);  // version sits beside title, before gear
 
-  // Version number (just left of gear)
-  tft.setTextColor(THEME_TEXT_DIM, THEME_SURFACE);
-  tft.drawString("v0.1c", 240, 37, 1);
+  // Row 2: BLE status — replaces "Cheap Yellow Display"
+  if (deviceConnected) {
+    tft.setTextColor(THEME_SUCCESS, THEME_SURFACE);
+    tft.drawString("● CONNECTED", 6, 31, 2);
+  } else {
+    tft.setTextColor(THEME_ERROR, THEME_SURFACE);
+    tft.drawString("○ BLE WAITING...", 6, 31, 2);
+  }
 
   // Dynamic grid layout - 5 icons per row
   int iconSize = 40;
@@ -414,18 +421,7 @@ void drawMenu() {
   int rows = (numApps + cols - 1) / cols;  // Calculate needed rows
   int startX = (320 - (cols * iconSize + (cols-1) * spacing)) / 2;
   int startY = 54;
-  
-  // Connection status
-  if (!deviceConnected) {
-    tft.setTextColor(THEME_ERROR, THEME_BG);
-    tft.drawCentreString("BLE WAITING...", 160, 210, 2);
-  } else {
-    // Clear the waiting message when connected
-    tft.fillRect(100, 200, 120, 20, THEME_BG);
-  }
-  tft.setTextColor(deviceConnected ? THEME_SUCCESS : THEME_ERROR, THEME_BG);
-  tft.drawString(deviceConnected ? "●" : "○", 290, 55, 2);
-  
+
   for (int i = 0; i < numApps; i++) {
     int col = i % cols;
     int row = i / cols;

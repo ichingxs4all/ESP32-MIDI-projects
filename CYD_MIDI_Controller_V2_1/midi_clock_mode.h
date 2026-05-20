@@ -331,11 +331,9 @@ void handleMidiClockMode() {
     }
   }
 
-  // Slave: drain DIN bytes + detect clock loss
+  // DIN bytes handled by central reader in loop(); clockReceiveByte() called there.
+  // Detect clock loss in slave mode (no pulse for >2 seconds)
   if (!clk.isMaster) {
-    while (MIDISerial.available()) {
-      clockReceiveByte((byte)MIDISerial.read());
-    }
     if (clk.slaveClockActive && millis() - clk.lastSlaveActivityMs > 2000) {
       clk.slaveClockActive = false;
       clk.slaveWindowFill  = 0;

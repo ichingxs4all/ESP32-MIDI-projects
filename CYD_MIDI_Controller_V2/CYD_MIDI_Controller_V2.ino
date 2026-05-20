@@ -4,8 +4,9 @@
  *******************************************************************/
 #include <Arduino.h>
 #include "EEPROM.h"
+#include "version.h"
 
-#define EEPROM_SIZE 4
+#define EEPROM_SIZE 11
 
 #include <SPI.h>
 #include <XPT2046_Touchscreen.h>
@@ -16,6 +17,7 @@
 #include <BLE2902.h>
 
 // Include mode files
+#include "settings_mode.h"
 #include "keyboard_mode.h"
 #include "sequencer_mode.h"
 #include "bouncing_ball_mode.h"
@@ -28,7 +30,6 @@
 #include "lfo_mode.h"
 #include "ui_elements.h"
 #include "midi_utils.h"
-#include "settings_mode.h"
 #include "monitor_mode.h"
 #include "midi_clock_mode.h"
 
@@ -125,89 +126,67 @@ class MIDICallbacks: public BLEServerCallbacks {
 // ------------------------------------------------------------------
 class BLEMidiReceiveCallbacks : public BLECharacteristicCallbacks {
   void onWrite(BLECharacteristic* pChar) {
-    // Use raw data pointer + length to avoid Arduino String null-byte truncation
-    // (velocity=0 Note Off contains 0x00 which would truncate a String)
     uint8_t* data = pChar->getData();
     size_t   len  = pChar->getLength();
-
-    // BLE-MIDI packet structure:
-    //   Byte 0: Header      (bits 7,6 = 1,0)
-    //   Byte 1: Timestamp   (bit 7 = 1)
-    //   Then: [optional timestamp (bit7=1)] [status] [data bytes] ...
-    // Mid-packet timestamps: bit7=1, NOT a MIDI status (i.e. < 0xF0 range is ambiguous,
-    // but we can detect them because they follow a complete message or data byte)
-
     if (len < 3) return;
 
-    size_t i = 2;  // skip packet header (0) and first timestamp (1)
-    byte   runningStatus = 0;
-    bool   expectingStatus = true;  // true = next non-timestamp byte is a status
+    // BLE→DIN bridge: copy the raw MIDI bytes (skip BLE-MIDI header/timestamps)
+    // and BLE MIDI Thru: echo back on BLE
+    // We parse the packet to extract clean status+data bytes for both purposes.
+
+    size_t i = 2;
+    byte   runningStatus  = 0;
+    bool   expectingStatus = true;
 
     while (i < len) {
       byte b = data[i];
 
-      // A mid-packet timestamp byte: bit7=1, bit6=1 (0xC0-0xFF range for header/ts,
-      // but timestamps are 0x80-0xBF per spec bits [7:6]=10).
-      // Reliable rule: if bit7=1 AND bit6=0 (0x80-0xBF) AND we are expecting a status
-      // → it's a timestamp, skip it.
-      // If bit7=1 AND bit6=1 (0xC0-0xFF) → also a timestamp header byte, skip.
-      // Actually per BLE-MIDI spec a mid-packet timestamp has bit7=1 and appears
-      // only before a status byte. The safest approach: if we expect a status byte
-      // and bit7=1 but the byte is in 0x80-0xBF, it could be EITHER a timestamp OR
-      // a real MIDI status. Disambiguate: timestamps have bit6=0 (0x80-0xBF),
-      // but so do Note Off (0x8n), Note On (0x9n), Poly AT (0xAn), CC (0xBn).
-      // The true distinction from the spec: timestamps always precede a status byte
-      // and have bits [7:6] = 1,0. Since MIDI statuses 0x80-0xBF also match this,
-      // we use position context: byte 1 is always a timestamp; subsequent 0x80-0xBF
-      // bytes are timestamps only when they immediately follow a complete message.
+      // Mid-packet timestamp detection (peek-ahead)
       if (expectingStatus && b >= 0x80 && b <= 0xBF) {
-        // Could be timestamp OR status 0x80-0xBF.
-        // Peek: if next byte also has bit7=1, this is a timestamp (status follows).
-        // If next byte has bit7=0, this IS the status byte.
-        if (i + 1 < len && (data[i+1] & 0x80)) {
-          // Next byte is also high-bit set → this is a timestamp, skip it
-          i++; continue;
-        }
-        // Otherwise fall through and treat as status
+        if (i + 1 < len && (data[i+1] & 0x80)) { i++; continue; }
       }
 
-      // Real-time single-byte messages (0xF8-0xFF) — no data bytes, no running status
+      // Real-time single-byte
       if (b >= 0xF8) {
         monitorPushEvent(b, 0, 0);
         clockReceiveByte(b);
+        if (ble2serial) MIDISerial.write(b);
+        if (midiThru)   { uint8_t p[3] = {data[0], data[1], b}; pCharacteristic->setValue(p, 3); pCharacteristic->notify(); }
         i++;
         continue;
       }
 
       if (b & 0x80) {
-        // Status byte
         runningStatus  = b;
         expectingStatus = false;
         i++;
         continue;
       }
 
-      // Data byte — use running status
-      if (runningStatus == 0) { i++; continue; }  // no status yet, discard
+      if (runningStatus == 0) { i++; continue; }
 
       byte cmd = runningStatus & 0xF0;
 
-      // Two-byte messages (one data byte)
       if (cmd == 0xC0 || cmd == 0xD0 || runningStatus == 0xF3) {
+        // Two-byte message
         monitorPushEvent(runningStatus, b, 0);
+        if (ble2serial) { MIDISerial.write(runningStatus); MIDISerial.write(b); }
+        if (midiThru)   { uint8_t p[4] = {data[0], data[1], runningStatus, b}; pCharacteristic->setValue(p, 4); pCharacteristic->notify(); }
         expectingStatus = true;
         i++;
         continue;
       }
 
-      // Three-byte messages (two data bytes)
+      // Three-byte message
       if (i + 1 < len && !(data[i+1] & 0x80)) {
-        // Second data byte available and is actually a data byte
         monitorPushEvent(runningStatus, b, data[i+1]);
+        if (ble2serial) { MIDISerial.write(runningStatus); MIDISerial.write(b); MIDISerial.write(data[i+1]); }
+        if (midiThru)   { uint8_t p[5] = {data[0], data[1], runningStatus, b, data[i+1]}; pCharacteristic->setValue(p, 5); pCharacteristic->notify(); }
         i += 2;
       } else {
-        // Only one data byte available (truncated packet)
         monitorPushEvent(runningStatus, b, 0);
+        if (ble2serial) { MIDISerial.write(runningStatus); MIDISerial.write(b); MIDISerial.write(0); }
+        if (midiThru)   { uint8_t p[5] = {data[0], data[1], runningStatus, b, 0}; pCharacteristic->setValue(p, 5); pCharacteristic->notify(); }
         i++;
       }
       expectingStatus = true;
@@ -218,9 +197,16 @@ class BLEMidiReceiveCallbacks : public BLECharacteristicCallbacks {
 void setup() {
   Serial.begin(115200);
   if (!EEPROM.begin(EEPROM_SIZE)) Serial.println("failed to initialize EEPROM");
-  if (EEPROM.read(0)!= 127) initEeprom();
-  channel = EEPROM.read(1);
-  gateLength = EEPROM.read(2);
+  if (EEPROM.read(0) != 129) initEeprom();
+  channel      = EEPROM.read(1);
+  gateLength   = EEPROM.read(2);
+  drumChannel  = EEPROM.read(4);
+  drumNotes[0] = EEPROM.read(5);
+  drumNotes[1] = EEPROM.read(6);
+  drumNotes[2] = EEPROM.read(7);
+  drumNotes[3] = EEPROM.read(8);
+  ble2serial   = EEPROM.read(9)  == 1;
+  midiThru     = EEPROM.read(10) == 1;
 
   // Touch setup
   mySpi.begin(XPT2046_CLK, XPT2046_MISO, XPT2046_MOSI, XPT2046_CS);
@@ -297,7 +283,31 @@ void setup() {
 
 void loop() {
   updateTouch();
-  
+
+  // ------------------------------------------------------------------
+  //  Central DIN MIDI reader — runs every tick regardless of mode.
+  //  Feeds: monitor parser, clock slave, DIN Thru, DIN→BLE bridge.
+  // ------------------------------------------------------------------
+  while (MIDISerial.available()) {
+    byte b = (byte)MIDISerial.read();
+
+    monitorParseDIN(b);   // always feed monitor
+    clockReceiveByte(b);  // always feed clock slave
+
+    // DIN MIDI Thru: echo back out on DIN
+    if (midiThru) MIDISerial.write(b);
+
+    // DIN→BLE bridge: wrap in a 3-byte BLE-MIDI packet
+    if (ble2serial && deviceConnected) {
+      unsigned long now = millis();
+      uint8_t hdr = 0x80 | ((now >> 7) & 0x3F);
+      uint8_t ts  = 0x80 | (now & 0x7F);
+      uint8_t pkt[3] = { hdr, ts, b };
+      pCharacteristic->setValue(pkt, 3);
+      pCharacteristic->notify();
+    }
+  }
+
   switch (currentMode) {
     case MENU:
       if (touch.justPressed) handleMenuTouch();
@@ -381,31 +391,30 @@ void drawGearIcon(int cx, int cy, int outerR, int innerR, int teeth, uint16_t co
 void drawMenu() {
   tft.fillScreen(THEME_BG);
 
-  // Header
+  // Header bar
   tft.fillRect(0, 0, 320, 48, THEME_SURFACE);
   tft.drawFastHLine(0, 48, 320, THEME_PRIMARY);
 
-  // Gear button area (top-right of header): 38x38, touching right edge with 4px margin
-  // Drawn first so title can avoid it
-  int gearX  = 276;  // left edge of gear hit area
-  int gearY  = 5;    // top edge
+  // Gear button (top-right, 38x38)
+  int gearX  = 276;
+  int gearY  = 5;
   int gearW  = 38;
   int gearH  = 38;
-  int gearCX = gearX + gearW / 2;
-  int gearCY = gearY + gearH / 2;
-
   tft.fillRoundRect(gearX, gearY, gearW, gearH, 6, THEME_BG);
-  drawGearIcon(gearCX, gearCY, 14, 9, 8, THEME_TEXT_DIM);
+  drawGearIcon(gearX + gearW / 2, gearY + gearH / 2, 14, 9, 8, THEME_TEXT_DIM);
 
-  // Title — centred in the space left of the gear (0..275)
+  // Row 1: title centred in the space left of the gear
   tft.setTextColor(THEME_PRIMARY, THEME_SURFACE);
-  tft.drawCentreString("MIDI CONTROLLER", 135, 8, 4);
-  tft.setTextColor(THEME_TEXT_DIM, THEME_SURFACE);
-  tft.drawCentreString("Cheap Yellow Display", 135, 28, 2);
+  tft.drawCentreString("MIDI CONTROLLER", 135, 5, 4);
 
-  // Version number (just left of gear)
-  tft.setTextColor(THEME_TEXT_DIM, THEME_SURFACE);
-  tft.drawString("v0.1c", 240, 37, 1);
+  // Row 2: BLE status
+  if (deviceConnected) {
+    tft.setTextColor(THEME_SUCCESS, THEME_SURFACE);
+    tft.drawString("● CONNECTED", 6, 31, 2);
+  } else {
+    tft.setTextColor(THEME_ERROR, THEME_SURFACE);
+    tft.drawString("○ BLE WAITING...", 6, 31, 2);
+  }
 
   // Dynamic grid layout - 5 icons per row
   int iconSize = 40;
@@ -414,18 +423,7 @@ void drawMenu() {
   int rows = (numApps + cols - 1) / cols;  // Calculate needed rows
   int startX = (320 - (cols * iconSize + (cols-1) * spacing)) / 2;
   int startY = 54;
-  
-  // Connection status
-  if (!deviceConnected) {
-    tft.setTextColor(THEME_ERROR, THEME_BG);
-    tft.drawCentreString("BLE WAITING...", 160, 210, 2);
-  } else {
-    // Clear the waiting message when connected
-    tft.fillRect(100, 200, 120, 20, THEME_BG);
-  }
-  tft.setTextColor(deviceConnected ? THEME_SUCCESS : THEME_ERROR, THEME_BG);
-  tft.drawString(deviceConnected ? "●" : "○", 290, 55, 2);
-  
+
   for (int i = 0; i < numApps; i++) {
     int col = i % cols;
     int row = i / cols;
