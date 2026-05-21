@@ -33,6 +33,15 @@
 #include "monitor_mode.h"
 #include "midi_clock_mode.h"
 #include "pgmchange_mode.h"
+#include "sd_card.h"
+#include "sd_menu_mode.h"
+#include "sd_seq_mode.h"
+#include "sd_player_mode.h"
+#include "sd_recorder_mode.h"
+#include "sd_setlist_mode.h"
+#include "sd_info_mode.h"
+#include "sd_sysex_mode.h"
+#include "slider_mode.h"
 
 // Hardware setup
 #define XPT2046_IRQ 36
@@ -61,7 +70,7 @@ TouchState touch;
 AppMode currentMode = MENU;
 
 // Forward declarations
-void drawMenu();
+// Mode forward declarations are in common_definitions.h
 
 // Scalable App Icon System
 // To add new apps:
@@ -93,10 +102,12 @@ AppIcon apps[] = {
   {"LFO", "", 0xAFE5, LFO},           // Light Green
   {"MONITOR", "⊙", 0x7BEF, MONITOR},
   {"CLOCK",   "♩", 0xF81F, MIDI_CLOCK_MODE},
-  {"PGMCH",   "",  0x04D2, PGMCHANGE_MODE}   // teal
+  {"PGMCH",   "",  0x04D2, PGMCHANGE_MODE},
+  {"SD CARD", "▣", 0xC618, SD_MENU_MODE},
+  {"SLIDERS", "≡", 0x867F, SLIDER_MODE}    // slate blue
 };
 
-int numApps = 13;
+int numApps = 15;
 
 class MIDICallbacks: public BLEServerCallbacks {
     void onConnect(BLEServer* pServer) {
@@ -120,6 +131,9 @@ class MIDICallbacks: public BLEServerCallbacks {
       BLEDevice::startAdvertising();
     }
 };
+
+// Forward declaration — sysexReceiveByte defined in sd_sysex_mode.h
+void sysexReceiveByte(byte b);
 
 // ------------------------------------------------------------------
 //  Unified BLE MIDI receive dispatcher
@@ -150,7 +164,7 @@ class BLEMidiReceiveCallbacks : public BLECharacteristicCallbacks {
 
       // Real-time single-byte
       if (b >= 0xF8) {
-        monitorPushEvent(b, 0, 0);
+        monitorPushEvent(b, 0, 0);  // recorder called inside monitorPushEvent
         clockReceiveByte(b);
         if (ble2serial) MIDISerial.write(b);
         if (midiThru)   { uint8_t p[3] = {data[0], data[1], b}; pCharacteristic->setValue(p, 3); pCharacteristic->notify(); }
@@ -159,6 +173,19 @@ class BLEMidiReceiveCallbacks : public BLECharacteristicCallbacks {
       }
 
       if (b & 0x80) {
+        // Check for sysex start/continuation
+        if (b == 0xF0 || (sysexRxActive && b != 0xF7 && b < 0xF8)) {
+          sysexReceiveByte(b);
+          if (ble2serial) MIDISerial.write(b);
+          i++;
+          continue;
+        }
+        if (b == 0xF7) {
+          sysexReceiveByte(b);
+          if (ble2serial) MIDISerial.write(b);
+          i++;
+          continue;
+        }
         runningStatus  = b;
         expectingStatus = false;
         i++;
@@ -278,6 +305,14 @@ void setup() {
   initializeMonitorMode();
   initializeMidiClockMode();
   initializePgmChangeMode();
+  initializeSDMenuMode();
+  initializeSDSeqMode();
+  initializeSDPlayerMode();
+  initializeSDRecorderMode();
+  initializeSDSetlistMode();
+  initializeSDInfoMode();
+  initializeSDSysexMode();
+  initializeSliderMode();
   
   drawMenu();
   updateStatus();
@@ -294,8 +329,9 @@ void loop() {
   while (MIDISerial.available()) {
     byte b = (byte)MIDISerial.read();
 
-    monitorParseDIN(b);   // always feed monitor
+    monitorParseDIN(b);   // feeds monitor, clock, and recorder via monitorPushEvent
     clockReceiveByte(b);  // always feed clock slave
+    sysexReceiveByte(b);  // feed sysex assembler (active only during F0..F7)
 
     // DIN MIDI Thru: echo back out on DIN
     if (midiThru) MIDISerial.write(b);
@@ -357,6 +393,30 @@ void loop() {
     case PGMCHANGE_MODE:
       handlePgmChangeMode();
       break;
+    case SD_MENU_MODE:
+      handleSDMenuMode();
+      break;
+    case SD_SEQ_MODE:
+      handleSDSeqMode();
+      break;
+    case SD_PLAYER_MODE:
+      handleSDPlayerMode();
+      break;
+    case SD_RECORDER_MODE:
+      handleSDRecorderMode();
+      break;
+    case SD_SETLIST_MODE:
+      handleSDSetlistMode();
+      break;
+    case SD_INFO_MODE:
+      handleSDInfoMode();
+      break;
+    case SD_SYSEX_MODE:
+      handleSDSysexMode();
+      break;
+    case SLIDER_MODE:
+      handleSliderMode();
+      break;
   }
   
   delay(20);
@@ -416,10 +476,10 @@ void drawMenu() {
   // Row 2: BLE status
   if (deviceConnected) {
     tft.setTextColor(THEME_SUCCESS, THEME_SURFACE);
-    tft.drawString("● BLE CONNECTED", 20, 28, 2);
+    tft.drawString("● CONNECTED", 6, 31, 2);
   } else {
     tft.setTextColor(THEME_ERROR, THEME_SURFACE);
-    tft.drawString("○ BLE WAITING...", 20, 28, 2);
+    tft.drawString("○ BLE WAITING...", 6, 31, 2);
   }
 
   // Dynamic grid layout - 5 icons per row
@@ -621,6 +681,27 @@ void drawAppGraphics(AppMode mode, int x, int y, int iconSize) {
         tft.drawCentreString("123", cx, cy, 2);
       }
       break;
+      case SD_MENU_MODE: // SD card outline shape
+      {
+        int cx = x + iconSize/2, cy = y + iconSize/2;
+        tft.fillRoundRect(cx-10, cy-13, 20, 26, 2, THEME_BG);
+        tft.fillTriangle(cx-10, cy-13, cx-4, cy-13, cx-10, cy-7, 0xC618);
+        tft.drawFastHLine(cx-7, cy-4, 14, 0xC618);
+        tft.drawFastHLine(cx-7, cy,   14, 0xC618);
+      }
+      break;
+      case SLIDER_MODE: // 6 slider tracks with thumb marks at staggered positions
+      {
+        int sx = x + 4, sw = iconSize - 8;
+        int thumbPositions[] = {20, 45, 60, 30, 75, 50};  // % across track
+        for (int s = 0; s < 6; s++) {
+          int sy = y + 4 + s * 6;
+          tft.drawFastHLine(sx, sy, sw, THEME_BG);
+          int thumbX = sx + (sw * thumbPositions[s]) / 100;
+          tft.fillRect(thumbX - 1, sy - 2, 3, 5, THEME_BG);
+        }
+      }
+      break;
   }
 }
 
@@ -694,6 +775,32 @@ void enterMode(AppMode mode) {
       break;
     case PGMCHANGE_MODE:
       drawPgmChangeMode();
+      break;
+    case SD_MENU_MODE:
+      drawSDMenuMode();
+      break;
+    case SD_SEQ_MODE:
+      drawSDSeqMode();
+      break;
+    case SD_PLAYER_MODE:
+      drawSDPlayerMode();
+      break;
+    case SD_RECORDER_MODE:
+      drawSDRecorderMode();
+      break;
+    case SD_SETLIST_MODE:
+      drawSDSetlistMode();
+      break;
+    case SD_INFO_MODE:
+      drawSDInfoMode();
+      break;
+    case SD_SYSEX_MODE:
+      sdInit();
+      sysexRefreshList();
+      drawSDSysexMode();
+      break;
+    case SLIDER_MODE:
+      drawSliderMode();
       break;
   }
   updateStatus();
