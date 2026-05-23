@@ -4,6 +4,9 @@ Touchscreen Bluetooth MIDI controller for the ESP32-2432S028R "Cheap Yellow Disp
 
 Special thanks to Brian Lough for putting together the resources on this board. Check out his repo for more examples: https://github.com/witnessmenow/ESP32-Cheap-Yellow-Display
 
+
+## IMPORTANT !! Use CUSTOM Partition Scheme when compiling..This binary is BIG
+
 ## Features
 
 ### 10 Interactive Modes
