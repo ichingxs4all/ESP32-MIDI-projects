@@ -113,8 +113,8 @@ AppIcon apps[] = {
   {"MONITOR", "⊙", 0x7BEF, MONITOR},
   {"CLOCK",   "♩", 0xF81F, MIDI_CLOCK_MODE},
   {"PGMCH",   "",  0x04D2, PGMCHANGE_MODE},
-  {"SD CARD", "▣", 0xC618, SD_MENU_MODE},
-  {"SLIDERS", "≡", 0x867F, SLIDER_MODE}    // slate blue
+  {"SLIDERS", "≡", 0x867F, SLIDER_MODE},   // slate blue
+  {"FILES",   "▣", 0xC618, SD_MENU_MODE}
 };
 
 int numApps = 15;
@@ -133,9 +133,14 @@ class MIDICallbacks: public BLEServerCallbacks {
         drawMenu(); // Redraw menu to show "BLE WAITING..."
       }
       updateStatus();
-      // Stop all notes
-      for (int i = 0; i < 128; i++) {
-        sendMIDI(0x80, i, 0);
+      // All Sound Off + All Notes Off on DIN for melody and drum channels
+      byte mc = 0xB0 | (byte)(channel - 1);
+      byte dc = 0xB0 | (byte)(drumChannel - 1);
+      MIDISerial.write(mc); MIDISerial.write(120); MIDISerial.write(0);
+      MIDISerial.write(mc); MIDISerial.write(123); MIDISerial.write(0);
+      if (drumChannel != channel) {
+        MIDISerial.write(dc); MIDISerial.write(120); MIDISerial.write(0);
+        MIDISerial.write(dc); MIDISerial.write(123); MIDISerial.write(0);
       }
       // Restart advertising so new connections can be made
       BLEDevice::startAdvertising();
@@ -449,7 +454,7 @@ void loop() {
       break;
   }
   
-  delay(20);
+  delay(10);  // 10ms: 2× faster than original (better MIDI timing) without starving ESP32 WiFi/LWIP
 }
 
 void drawGearIcon(int cx, int cy, int outerR, int innerR, int teeth, uint16_t color) {
@@ -474,9 +479,7 @@ void drawGearIcon(int cx, int cy, int outerR, int innerR, int teeth, uint16_t co
     int x2 = cx + (int)(outerR * cos1);
     int y2 = cy + (int)(outerR * sin1);
     int x3 = cx + (int)(outerR * cos0);
-    int y3 = cy + (int)(outerR * cos0 < 0 ? -sin0 : sin0);  // keep consistent
-    x3 = cx + (int)(outerR * cos0);
-    y3 = cy + (int)(outerR * sin0);
+    int y3 = cy + (int)(outerR * sin0);
 
     // Draw tooth as two triangles
     tft.fillTriangle(x0, y0, x1, y1, x2, y2, color);
@@ -509,23 +512,23 @@ void drawMenu() {
   // BLE status
   if (deviceConnected) {
     tft.setTextColor(THEME_SUCCESS, THEME_SURFACE);
-    tft.drawString("● BLE", 6, 32, 1);
+    tft.drawString("● BLE", 16, 32, 1);
   } else {
     tft.setTextColor(THEME_ERROR, THEME_SURFACE);
-    tft.drawString("○ BLE", 6, 32, 1);
+    tft.drawString("○ BLE", 16, 32, 1);
   }
 
 #ifdef ENABLE_WIFI
   // AppleMIDI / WiFi status (middle)
   if (appleMidiRunning) {
     tft.setTextColor(THEME_ACCENT, THEME_SURFACE);
-    tft.drawString("♪ NET: " + wifiIPText, 60, 32, 1);
+    tft.drawCentreString("♪ NET: " + wifiIPText, 135, 32, 1);
   } else if (wifiConnected) {
     tft.setTextColor(THEME_WARNING, THEME_SURFACE);
-    tft.drawString("WiFi: " + wifiIPText, 60, 32, 1);
+    tft.drawCentreString("WiFi: " + wifiIPText, 135, 32, 1);
   } else if (appleMidiEnabled) {
     tft.setTextColor(THEME_TEXT_DIM, THEME_SURFACE);
-    tft.drawString("WiFi off", 60, 32, 1);
+    tft.drawCentreString("WiFi off", 135, 32, 1);
   }
 #endif
 
@@ -772,8 +775,8 @@ void handleMenuTouch() {
   int spacing = 8;  // Matching the drawMenu spacing
   int cols = 5;     // Always 5 icons per row
   int startX = (320 - (cols * iconSize + (cols-1) * spacing)) / 2;
-  int startY = 65;
-  
+  int startY = 54;
+
   for (int i = 0; i < numApps; i++) {
     int col = i % cols;
     int row = i / cols;

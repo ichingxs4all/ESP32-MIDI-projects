@@ -20,13 +20,13 @@ extern const int   SD_NUM_DIRS;
 void sdCreateDirs();   // forward — implemented in sd_info_mode.h
 
 bool sdInit() {
+  if (sdMounted) return true;
+
   // The CYD touchscreen uses VSPI (mySpi, pins 25/39/32/33).
   // SD card uses HSPI routed to the SD slot's physical pins 18/19/23/5.
   // The ESP32 GPIO matrix allows HSPI to use any GPIO, so this is valid.
   static SPIClass spi(HSPI);
   spi.begin(18, 19, 23, 5);  // SCK=18, MISO=19, MOSI=23, CS=5
-
-  if (sdMounted) return true;
 
   SD.end();
   if (!SD.begin(5, spi, 40000000)) {

@@ -83,7 +83,7 @@ void drawSDMenuMode() {
   tft.fillRect(0, 0, 320, 48, THEME_SURFACE);
   tft.drawFastHLine(0, 48, 320, THEME_PRIMARY);
   tft.setTextColor(THEME_PRIMARY, THEME_SURFACE);
-  tft.drawCentreString("SD CARD", 160, 5, 4);
+  tft.drawCentreString("FILES", 160, 5, 4);
   if (sdMounted) {
     tft.setTextColor(THEME_SUCCESS, THEME_SURFACE);
     tft.drawCentreString("● Card ready", 160, 30, 2);

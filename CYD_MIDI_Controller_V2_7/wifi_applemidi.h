@@ -69,6 +69,7 @@ void wifiOnConnected() {
   wifiStatusText = "Connected";
   Serial.printf("[WIFI] IP: %s\n", wifiIPText.c_str());
   if (currentMode == MENU) drawMenu();
+  if (inWifiSubMenu)       drawWifiSettingsMode();  // show IP immediately when user is watching
   Serial.println("[WIFI] Calling MIDI.begin...");
   MIDI.begin(MIDI_CHANNEL_OMNI);
   Serial.printf("[WIFI] AppleMIDI session: %s\n", AppleMIDI.getName());
@@ -177,13 +178,12 @@ void appleMidiSetupReceive() {
 //  to be true — the session must keep running to accept connections.
 // ------------------------------------------------------------------
 void appleMidiTick() {
-  // Throttle polling to ~500ms intervals
-  static unsigned long lastPoll = 0;
   unsigned long now = millis();
-  if (now - lastPoll < 500) return;
-  lastPoll = now;
 
-  if (wifiConnecting) {
+  // WiFi connect polling: every 500ms, up to 20 tries (10 second timeout)
+  static unsigned long lastConnectPoll = 0;
+  if (wifiConnecting && now - lastConnectPoll >= 500) {
+    lastConnectPoll = now;
     int status = WiFi.status();
     Serial.printf("[WIFI] connect poll try=%d  WiFi.status=%d\n", wifiConnectTries, status);
     if (status == WL_CONNECTED) {
@@ -198,6 +198,12 @@ void appleMidiTick() {
   }
 
   if (!wifiConnected) return;
+
+  // AppleMIDI/RTP-MIDI packet processing: every 10ms for prompt handshake and MIDI clock
+  static unsigned long lastMidiPoll = 0;
+  if (now - lastMidiPoll < 10) return;
+  lastMidiPoll = now;
+
   static bool tickLoggedOnce = false;
   if (!tickLoggedOnce) {
     Serial.println("[WIFI] First AppleMIDI.read() + MIDI.read() call");

@@ -3,6 +3,7 @@
 
 #include "common_definitions.h"
 extern HardwareSerial MIDISerial;
+extern int drumChannel;  // defined in settings_mode.h
 
 // Scale definitions
 Scale scales[] = {
@@ -57,15 +58,25 @@ int getNoteInScale(int scaleIndex, int degree, int octave) {
 }
 
 String getNoteNameFromMIDI(int midiNote) {
-  String noteNames[] = {"C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"};
-  int noteIndex = midiNote % 12;
-  int octave = (midiNote / 12) - 1;
-  return noteNames[noteIndex] + String(octave);
+  static const char* noteNames[] = {"C","C#","D","D#","E","F","F#","G","G#","A","A#","B"};
+  return String(noteNames[midiNote % 12]) + String((midiNote / 12) - 1);
 }
 
 void stopAllModes() {
-  for (int i = 0; i < 128; i++) {
-    sendMIDI(0x80, i, 0);
+  // All Sound Off (CC 120) + All Notes Off (CC 123): two messages replace 128 note-offs
+  sendMIDI(0xB0, 120, 0);
+  sendMIDI(0xB0, 123, 0);
+  // Also silence drum channel if it differs from the melody channel
+  if (drumChannel != channel) {
+    byte dc = 0xB0 | (byte)(drumChannel - 1);
+    if (deviceConnected) {
+      midiPacket[2] = dc; midiPacket[3] = 120; midiPacket[4] = 0;
+      pCharacteristic->setValue(midiPacket, 5); pCharacteristic->notify();
+      midiPacket[3] = 123;
+      pCharacteristic->setValue(midiPacket, 5); pCharacteristic->notify();
+    }
+    MIDISerial.write(dc);  MIDISerial.write((byte)120); MIDISerial.write((byte)0);
+    MIDISerial.write(dc);  MIDISerial.write((byte)123); MIDISerial.write((byte)0);
   }
 }
 

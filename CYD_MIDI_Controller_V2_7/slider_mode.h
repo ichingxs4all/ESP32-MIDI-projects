@@ -135,8 +135,8 @@ void drawSliderRow(int idx, bool highlight) {
   tft.setTextColor(highlight ? THEME_BG : THEME_TEXT_DIM, bgLabel);
   tft.drawString("Ch" + String(s.channel) + " " + typeHint, 4, y + 16, 1);
 
-  // Track background
-  tft.fillRect(SLIDER_TRACK_X, y + 3, SLIDER_TRACK_W, SLIDER_H - 6, THEME_BG);
+  // Clear full area the thumb can reach (1px above/below the outline) then redraw outline on top
+  tft.fillRect(SLIDER_TRACK_X, y + 2, SLIDER_TRACK_W, SLIDER_H - 4, THEME_BG);
   tft.drawRect(SLIDER_TRACK_X, y + 3, SLIDER_TRACK_W, SLIDER_H - 6, THEME_TEXT_DIM);
 
   // Fill

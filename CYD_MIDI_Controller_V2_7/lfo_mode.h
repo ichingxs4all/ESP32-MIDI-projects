@@ -116,39 +116,27 @@ void drawLFOControls() {
 }
 
 void drawWaveform() {
-  // Draw a mini waveform visualization
-  int waveX = 10;
-  int waveY = 180;
-  int waveW = 200;
-  int waveH = 30;
-  
+  int waveX = 10, waveY = 180, waveW = 200, waveH = 30;
+  tft.fillRect(waveX + 1, waveY + 1, waveW - 2, waveH - 2, THEME_BG);
   tft.drawRect(waveX, waveY, waveW, waveH, THEME_TEXT_DIM);
-  
-  // Draw waveform based on type
+
+  int lastX = waveX + 1, lastY = waveY + waveH / 2;
   for (int x = 0; x < waveW - 2; x++) {
     float phase = (x / (float)(waveW - 2)) * 2 * PI;
-    float value = 0;
-    
+    float value;
     switch (lfo.waveform) {
-      case 0: // Sine
-        value = sin(phase);
-        break;
-      case 1: // Triangle
-        value = (phase <= PI) ? (2 * phase / PI - 1) : (3 - 2 * phase / PI);
-        break;
-      case 2: // Square
-        value = (phase <= PI) ? 1 : -1;
-        break;
-      case 3: // Sawtooth
-        value = 2 * phase / (2 * PI) - 1;
-        break;
+      case 0: value = sin(phase); break;
+      case 1: value = (phase <= PI) ? (2 * phase / PI - 1) : (3 - 2 * phase / PI); break;
+      case 2: value = (phase <= PI) ? 1.0f : -1.0f; break;
+      case 3: value = phase / PI - 1.0f; break;  // simplified from 2*phase/(2*PI)-1
+      default: value = 0; break;
     }
-    
-    int y = waveY + waveH/2 - (value * waveH/4);
-    tft.drawPixel(waveX + 1 + x, y, THEME_PRIMARY);
+    int curX = waveX + 1 + x;
+    int curY = waveY + waveH / 2 - (int)(value * waveH / 4);
+    if (x > 0) tft.drawLine(lastX, lastY, curX, curY, THEME_PRIMARY);
+    lastX = curX;
+    lastY = curY;
   }
-  
-  // Phase indicator removed per user request
 }
 
 void handleLFOMode() {
