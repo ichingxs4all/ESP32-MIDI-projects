@@ -1,0 +1,18 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(arduino-cli version *)",
+      "Read(//Applications/**)",
+      "Bash('/Applications/Arduino IDE.app/Contents/Resources/app/lib/backend/resources/arduino-cli' compile --fqbn esp32:esp32:esp32:UploadSpeed=460800,CPUFreq=240,FlashFreq=80,FlashMode=qio,FlashSize=4M,PartitionScheme=custom,DebugLevel=none,PSRAM=disabled,LoopCore=1,EventsCore=1,EraseFlash=none,JTAGAdapter=default,ZigbeeMode=default --libraries /Users/iching/Library/Arduino15/libraries,/Users/iching/Documents/Arduino/libraries --build-path /Users/iching/Desktop/CYD_MIDI_Controller_V2_7/build/esp32.esp32.esp32 --warnings none /Users/iching/Desktop/CYD_MIDI_Controller_V2_7)",
+      "Bash('/Applications/Arduino IDE.app/Contents/Resources/app/lib/backend/resources/arduino-cli' upload --fqbn esp32:esp32:esp32:UploadSpeed=460800,CPUFreq=240,FlashFreq=80,FlashMode=qio,FlashSize=4M,PartitionScheme=custom,DebugLevel=none,PSRAM=disabled,LoopCore=1,EventsCore=1,EraseFlash=none,JTAGAdapter=default,ZigbeeMode=default --port /dev/cu.usbserial-10 --input-dir /Users/iching/Desktop/CYD_MIDI_Controller_V2_7/build/esp32.esp32.esp32 /Users/iching/Desktop/CYD_MIDI_Controller_V2_7)",
+      "Bash(python3 -c ' *)",
+      "Bash(stty -f /dev/cu.usbserial-10)",
+      "Bash(system_profiler SPUSBDataType)",
+      "Bash(ioreg -p IOUSB -l -w 0)",
+      "Bash(ioreg -r -c IOSerialBSDClient)",
+      "Bash(cp -r \"/Users/iching/Desktop/CYD_MIDI_Controller_V2_7\" \"/Users/iching/Desktop/CYD_MIDI_Controller_V2_9\")",
+      "Bash(mv /Users/iching/Desktop/CYD_MIDI_Controller_V2_9/CYD_MIDI_Controller_V2_8.ino /Users/iching/Desktop/CYD_MIDI_Controller_V2_9/CYD_MIDI_Controller_V2_9.ino)",
+      "Read(//Users/iching/Desktop/**)"
+    ]
+  }
+}
